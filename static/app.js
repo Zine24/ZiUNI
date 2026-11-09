@@ -3,12 +3,34 @@
   const main = document.getElementById("main");
   const navRoot = document.querySelector("nav");
   let state = { m: null, quiz: null, answers: {}, examMode: false };
+  // Global bridge used by inline handlers generated in the views.
+  window.ZCU = window.ZCU || {};
 
-  navRoot.addEventListener("click", (e) => {
-    const a = e.target.closest("a[data-route]");
+  // All in-app hash links (sidebar + content) go through the router.
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest('a[href^="#/university"]');
     if (!a) return;
-    route(a.dataset.route);
+    e.preventDefault();
+    route(a.getAttribute("href").slice(1));
   });
+
+  // Mark the sidebar entry that matches the current route (including subroutes).
+  function setActiveNav(route) {
+    const links = [...navRoot.querySelectorAll("a[data-route]")];
+    let best = null;
+    for (const a of links) {
+      const r = a.dataset.route;
+      if (route === r || route.startsWith(r + "/")) {
+        if (!best || r.length > best.dataset.route.length) best = a;
+      }
+    }
+    for (const a of links) {
+      const on = a === best;
+      a.classList.toggle("active", on);
+      if (on) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    }
+  }
 
   async function api(path, body) {
     const opt = { headers: { "Content-Type": "application/json" } };
@@ -20,7 +42,9 @@
 
   function page(title, sub, html) {
     main.innerHTML = `<div class="page"><h1>${title}</h1><div class="sub">${sub}</div>${html}</div>`;
-    main.querySelectorAll("a[data-route]").forEach(a => a.classList.toggle("active", a.dataset.route === location.hash.slice(1)));
+    document.title = title.includes("ZiCore University") ? title : `${title} · ZiCore University`;
+    setActiveNav(location.hash.slice(1));
+    main.focus({ preventScroll: true });
   }
   function card(title, big, lbl, cls = "") {
     return `<div class="card"><h3>${title}</h3><div class="big ${cls}">${big}</div><div class="lbl">${lbl}</div></div>`;
@@ -28,7 +52,9 @@
   function bar(pct, cls = "") { return `<div class="bar"><div style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>`; }
 
   async function route(r) {
-    location.hash = r;
+    if (!r) r = "/university/dashboard";
+    if (location.hash.slice(1) !== r) history.pushState(null, "", "#" + r);
+    setActiveNav(r);
     document.getElementById("main").innerHTML = '<div class="loader">…</div>';
     try {
       if (r.endsWith("/dashboard")) return await dashboard();
@@ -58,10 +84,11 @@
     const [d, prog, mastery, cred] = await Promise.all([
       api("/student/dashboard"), api("/progress"), api("/mastery"), api("/credits"),
     ]);
+    const initials = d.program.split(/\s+/).filter(w => w !== "&").map(w => w[0]).join("").slice(0, 4).toUpperCase();
     page("ZiCore University", "University of Engineering, Science, Space & Advanced Technology",
       `<div class="grid g4">
-        ${card("Program", d.program.slice(0, 1).toUpperCase(), "Aerospace & Space Systems")}
-        ${card("Level", "Advanced Engineering", "Level 4 · 5 carreras")}
+        ${card("Program", initials, "Aerospace & Space Systems")}
+        ${card("Level", "Nivel 4", "Advanced Engineering · 5 carreras")}
         ${card("Progress", d.progress + "%", "Del programa completo")}
         ${card("GPA", d.gpa + " / 10", "Zi GPA Engine")}
       </div>
@@ -69,7 +96,7 @@
         ${card("Mastery", (d.mastery||0) + "%", "Knowledge Graph")}
         ${card("Credits", d.credits + "%", "240 académicos")}
         ${card("Professional", d.professional + "%", "Readiness Score")}
-        ${card("Health", d.health, "Zi Health Manager")}
+        ${card("Health", d.health, "Zi Health Manager", "text")}
       </div>
       <div class="grid g2" style="margin-top:16px">
         <div class="card"><h3>Progreso de módulos</h3><div class="big">${prog.modules_done} / ${prog.modules_total}</div><div class="lbl">Módulos dominados (≥70%)</div>${bar(prog.percent)}</div>
@@ -91,8 +118,8 @@
     const flag = !opened ? '<span class="badge warn">BLOQUEADO</span>'
       : (c.done === c.total && c.total > 0 ? '<span class="badge ok">COMPLETADO</span>' : '<span class="badge info">ACTIVO</span>');
     return `<div class="card level-card" style="border-left-color:${c.color}">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <h3 style="font-size:14px">${c.code} · ${c.name}</h3>${flag}
+      <div class="row-between">
+        <h3 class="card-title">${c.code} · ${c.name}</h3>${flag}
       </div>
       <div class="mono" style="font-size:11px;color:${c.color}">${c.name_en} · ${c.credits} créd.</div>
       <p style="font-size:12px;color:var(--mut);margin:8px 0">${c.desc}</p>
@@ -119,7 +146,7 @@
     }
     if (level === 3 && data.careers) {
       const blocks = data.careers.map(c => `<div class="card" style="margin:14px 0;border-left:3px solid ${c.color}">
-        <h3 style="font-size:15px">${c.code} · ${c.name}</h3>
+        <h3 class="card-title">${c.code} · ${c.name}</h3>
         <div class="mono" style="font-size:12px;color:${c.color}">${c.name_en}</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px">
           ${c.courses.map(co => courseCard(3, co, info.base + "/course/" + co.id)).join("")}
@@ -165,7 +192,7 @@
        ${c.modules.map(m => {
          return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
            <div style="flex:1;min-width:200px">
-             <h3 style="text-transform:none;color:var(--txt);font-size:14px">${m.order}. ${m.name}</h3>
+             <h3 class="card-title">${m.order}. ${m.name}</h3>
              <div style="font-size:12px;color:var(--mut);margin-top:4px">Lecciones: ${m.lessons_done}/${m.lessons.length} · Dominio: ${m.score ?? "—"}${m.score != null ? "%" : ""}</div>
              <div style="font-size:12px;margin-top:6px">${bar(m.score || 0)}</div>
            </div>
@@ -186,7 +213,7 @@
          ${m.lessons.map((l, i) => `<div class="qrow" style="margin-bottom:0">
            <details>
              <summary style="cursor:pointer;font-weight:600">${i + 1}. ${l.title} <span class="tag">${i + 1 <= isDone ? "leída" : "pendiente"}</span></summary>
-             <div style="white-space:pre-wrap;font-size:13px;color:var(--mut);margin-top:10px;line-height:1.7">${l.body}</div>
+             <div class="reading">${l.body}</div>
              <button class="ghost" style="margin-top:12px" onclick="window.ZCU.readLesson(${level},'${mid}', ${l.id})">Marcar lección leída</button>
            </details>
          </div>`).join("")}
@@ -232,7 +259,6 @@
         <button class="ghost" style="margin-top:12px" onclick="window.ZCU.evalL0(${lv},'${m}')">Re-evaluar</button>
         <button style="margin-left:8px" onclick="window.ZCU.courseBack('${m.course_id || ""}')">Volver al curso</button>
       </div>`;
-      await window.ZCU.refreshBack(lv, m);
     };
     render();
   }
@@ -246,11 +272,11 @@
         const badge = s.mastered ? '<span class="badge ok">DOMINADA</span>'
           : (s.open ? '<span class="badge">PENDIENTE</span>' : '<span class="badge warn">BLOQUEADA</span>');
         return `<div class="card" style="margin-bottom:8px">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <div class="row-between">
             <h4 style="font-size:13px;margin:0">Sesión ${i + 1}. ${s.title}</h4>${badge}
           </div>
           <details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--acc)">Ver contenido</summary>
-            <div style="white-space:pre-wrap;font-size:13px;color:var(--mut);margin-top:8px;line-height:1.7">${s.body}</div>
+            <div class="reading">${s.body}</div>
             <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
               <button class="ghost" onclick="window.ZCU.readSession(${level},'${s.id}')">Marcar leída</button>
               ${s.open ? `<button onclick="window.ZCU.sessionExam(${level},'${s.id}')">Examen de sesión</button>` : ""}
@@ -264,8 +290,8 @@
       const finalBtn = fin.open ? `<button onclick="window.ZCU.finalExam(${level},'${c.id}',${lev.no})">Examen final del nivel ${lev.no}</button>`
         : `<span class="badge warn">Examen final bloqueado</span>`;
       return `<div class="card" style="border-left:3px solid ${c.color};margin:14px 0">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <h3 style="font-size:14px;margin:0">Nivel ${lev.no} · ${lev.name}</h3>
+        <div class="row-between">
+          <h3 class="card-title" style="margin:0">Nivel ${lev.no} · ${lev.name}</h3>
           ${lev.done ? '<span class="badge ok">COMPLETADO</span>' : ''}
         </div>
         <div style="font-size:12px;color:var(--mut);margin:4px 0 8px">${lev.credits} créditos al aprobar</div>
@@ -482,7 +508,7 @@
           <button class="ghost" style="margin-left:8px" onclick="window.ZCU.breakp()">+ Pausa</button>
         </div>
       </div>
-      ${card("Zi Mentor", "Recomendaciones adaptativas", "Explica · ejercicios · análisis de errores · planes de estudio")}` +
+      ${card("Zi Mentor", "Recomendaciones adaptativas", "Explica · ejercicios · análisis de errores · planes de estudio", "text")}` +
       `<div class="card" style="margin-top:16px"><h3>Recomendaciones de bienestar</h3><div id="rec"></div></div>`);
     api("/health-manager/recommendations").then(r => {
       document.getElementById("rec").innerHTML = r.recommendations.map(x => `<div style="margin:6px 0;font-size:13px">▪ ${x}</div>`).join("");
@@ -499,7 +525,7 @@
       `<div class="grid g4">
         ${card("Research Projects", "0", "Grupos y publicaciones")}
         ${card("ZiLabs", "9", "Física · Computación · Simulación · Aeroespacial · Propulsión · Nuclear · Space · IA · Robótica")}
-        ${card("Capstone", "Pendiente", "Proyectos de integración")}
+        ${card("Capstone", "Pendiente", "Proyectos de integración", "text")}
         ${card("Interdisciplinary", "✔", "Nuclear+Propulsión+Space · IA+Órbita+Space")}
       </div>
       <div class="card" style="margin-top:16px"><h3>Ruta de investigación</h3>
@@ -517,6 +543,9 @@
   }
 
   // boot
-  window.addEventListener("hashchange", () => route(location.hash.slice(1) || "/university/dashboard"));
-  route(location.hash.slice(1) || "/university/dashboard");
+  window.addEventListener("popstate", () => route(location.hash.slice(1) || "/university/dashboard"));
+  const initial = location.hash.slice(1)
+    || (location.pathname.startsWith("/university/") ? location.pathname : "/university/dashboard");
+  history.replaceState(null, "", "#" + initial);
+  route(initial);
 })();
